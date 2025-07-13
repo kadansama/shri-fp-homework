@@ -14,38 +14,63 @@
  * Иногда промисы от API будут приходить в состояние rejected, (прямо как и API в реальной жизни)
  * Ответ будет приходить в поле {result}
  */
- import Api from '../tools/api';
+import Api from '../tools/api';
+import * as R from 'ramda';
 
- const api = new Api();
+const api = new Api();
 
- /**
-  * Я – пример, удали меня
-  */
- const wait = time => new Promise(resolve => {
-     setTimeout(resolve, time);
- })
+const validateLength = R.both(
+  R.pipe(R.prop('length'), R.gt(R.__, 2)),
+  R.pipe(R.prop('length'), R.lt(R.__, 10))
+);
 
- const processSequence = ({value, writeLog, handleSuccess, handleError}) => {
-     /**
-      * Я – пример, удали меня
-      */
-     writeLog(value);
+const validateFormat = R.test(/^[0-9]+(\.[0-9]+)?$/);
 
-     api.get('https://api.tech/numbers/base', {from: 2, to: 10, number: '01011010101'}).then(({result}) => {
-         writeLog(result);
-     });
+const validatePositive = R.pipe(
+  parseFloat,
+  R.gt(R.__, 0)
+);
 
-     wait(2500).then(() => {
-         writeLog('SecondLog')
+const validateInput = R.allPass([validateLength, validateFormat, validatePositive]);
+const createTransformers = (writeLog) => {
+  const log = R.tap(writeLog);
+  const logAndPass = R.pipe(log, R.identity);
 
-         return wait(1500);
-     }).then(() => {
-         writeLog('ThirdLog');
+  return {
+    processNumber: R.pipe(parseFloat, Math.round, logAndPass),
+    logResult: log,
+    logBinaryLength: R.pipe(R.prop('length'), logAndPass),
+    squareAndLog: R.pipe(x => x ** 2, logAndPass),
+    mod3AndLog: R.pipe(x => x % 3, logAndPass)
+  };
+};
 
-         return wait(400);
-     }).then(() => {
-         handleSuccess('Done');
-     });
- }
+const processSequence = ({value, writeLog, handleSuccess, handleError}) => {
+  writeLog(value);
+
+  if (!validateInput(value)) {
+    handleError('ValidationError');
+    return;
+  }
+
+  const {processNumber, logResult, logBinaryLength, squareAndLog, mod3AndLog} = 
+    createTransformers(writeLog);
+
+  Promise.resolve(processNumber(value))
+    .then(num => api.get('https://api.tech/numbers/base', {
+      from: 10,
+      to: 2,
+      number: num
+    }))
+    .then(R.prop('result'))
+    .then(logResult)
+    .then(logBinaryLength)
+    .then(squareAndLog)
+    .then(mod3AndLog)
+    .then(mod => api.get(`https://animals.tech/${mod}`, {}))
+    .then(R.prop('result'))
+    .then(handleSuccess)
+    .catch(handleError);
+};
 
 export default processSequence;
